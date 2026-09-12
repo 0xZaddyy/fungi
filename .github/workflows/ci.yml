@@ -1,18 +1,26 @@
 name: flake checks
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
 permissions:
   contents: read
 jobs:
   validate-commits:
     runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
     steps:
-      - name: Compute fetch depth
+      - name: Compute initial fetch depth
         id: fetch-depth
-        run: echo "depth=$(( ${{ github.event.pull_request.commits }} + 1 ))" >> "$GITHUB_OUTPUT"
+        env:
+          PR_COMMITS: ${{ github.event.pull_request.commits || 0 }}
+        run: echo "depth=$((PR_COMMITS + 2))" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: ${{ steps.fetch-depth.outputs.depth }}
+      - name: Fetch validation history
+        run: bash .github/scripts/fetch-validation-history.sh "$BASE_SHA"
       - name: Check Nix flake inputs
         uses: DeterminateSystems/flake-checker-action@de924abd783455e8429c858962b9e43062d19da1 # v13
         with:
@@ -25,4 +33,4 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@55718cd9ebf1737a061487d5ada21abf31e99a98 # main
       - name: Validate commits
         run: >-
-          nix run --no-update-lock-file '.?shallow=1#validate-commits' -- '${{ github.event.pull_request.base.sha }}..HEAD'
+          nix run --no-update-lock-file '.?shallow=1#validate-commits' -- "$BASE_SHA..HEAD"
