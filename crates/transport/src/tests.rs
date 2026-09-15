@@ -216,6 +216,10 @@ async fn sequential_non_sync_driver_needs_no_split_or_lock() {
         receive(&mut channel).await.unwrap_err().kind(),
         io::ErrorKind::WouldBlock
     );
+    let mut converted = CodecChannel::new(channel, Decimal);
+    anonymous(&converted);
+    converted.send("8".to_owned()).await.unwrap();
+    assert_eq!(receive(&mut converted).await.unwrap(), "8");
 }
 
 #[tokio::test]
@@ -263,6 +267,154 @@ async fn local_construction_supports_simplex_duplex_and_backend_errors() {
     let mut receiver = Builder(Some(receiver)).build(&()).await.unwrap();
     sender.send(5).await.unwrap();
     assert_eq!(receive(&mut receiver).await.unwrap(), 5);
+}
+
+#[derive(Debug)]
+struct Decimal;
+
+impl Encode<String, u32> for Decimal {
+    type EncodeError = std::num::ParseIntError;
+    fn encode(&self, message: String) -> Result<u32, Self::EncodeError> {
+        message.parse()
+    }
+}
+
+impl Decode<u32, String> for Decimal {
+    type DecodeError = io::Error;
+    fn decode(&self, message: u32) -> Result<String, io::Error> {
+        if message == 0 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "zero rejected"));
+        }
+        Ok(message.to_string())
+    }
+}
+
+fn codec<K: Codec<String, u32>>(_: &K) {}
+
+#[tokio::test]
+async fn generic_duplex_conversion_preserves_peer_privacy_and_error_sources() {
+    codec(&Decimal);
+    let mut channel = pair(1).with_codec(Decimal);
+    duplex(&channel);
+    anonymous(&channel);
+    assert_eq!(*channel.peer(), 1);
+    let error = channel.send("invalid".to_owned()).await.unwrap_err();
+    assert!(matches!(error, CodecError::Codec(_)));
+    assert!(error.to_string().starts_with("codec: "));
+    assert!(error.source().is_some());
+    channel.send("42".to_owned()).await.unwrap();
+    assert_eq!(receive(&mut channel).await.unwrap(), "42");
+    let (mut sender, mut receiver) = split(channel);
+    anonymous(&sender);
+    sender.send("0".to_owned()).await.unwrap();
+    let error = receive(&mut receiver).await.unwrap_err();
+    assert!(matches!(error, CodecError::Codec(_)));
+    assert_eq!(error.to_string(), "codec: zero rejected");
+    assert_eq!(error.source().unwrap().to_string(), "zero rejected");
+    sender.send("43".to_owned()).await.unwrap();
+    assert_eq!(receive(&mut receiver).await.unwrap(), "43");
+}
+
+#[derive(Debug)]
+struct EncodeOnly;
+impl Encode<String, u32> for EncodeOnly {
+    type EncodeError = Infallible;
+    fn encode(&self, message: String) -> Result<u32, Infallible> {
+        Ok(message.len() as u32)
+    }
+}
+
+#[derive(Debug)]
+struct DecodeOnly;
+impl Decode<u32, String> for DecodeOnly {
+    type DecodeError = Infallible;
+    fn decode(&self, message: u32) -> Result<String, Infallible> {
+        Ok(message.to_string())
+    }
+}
+
+#[tokio::test]
+async fn simplex_conversions_need_only_their_own_direction() {
+    let (sender, receiver) = simplex(1);
+    let mut sender = CodecChannel::new(sender, EncodeOnly);
+    let mut receiver = CodecChannel::new(receiver, DecodeOnly);
+    anonymous(&sender);
+    sender.send("hello".to_owned()).await.unwrap();
+    assert_eq!(receive(&mut receiver).await.unwrap(), "5");
+}
+
+#[tokio::test]
+async fn converted_channels_preserve_transport_failures() {
+    let (sender, receiver) = simplex(1);
+    drop(receiver);
+    let mut sender = CodecChannel::new(sender, Decimal);
+    let error = sender.send("42".to_owned()).await.unwrap_err();
+    assert!(matches!(error, CodecError::Transport(_)));
+    assert!(error.to_string().starts_with("transport: "));
+    assert_eq!(error.source().unwrap().to_string(), "channel closed");
+
+    let (sender, receiver) = simplex(1);
+    drop(sender);
+    let mut receiver = CodecChannel::new(receiver, Decimal);
+    let error = receive(&mut receiver).await.unwrap_err();
+    assert!(matches!(error, CodecError::Transport(_)));
+    assert_eq!(error.to_string(), "transport: receiver closed");
+    assert_eq!(error.source().unwrap().to_string(), "receiver closed");
+}
+
+#[tokio::test]
+async fn independent_converters_bundle_into_a_duplex_codec() {
+    let conversions = CodecPair::new(EncodeOnly, DecodeOnly);
+    codec(&conversions);
+    let mut channel = CodecChannel::new(pair(1), conversions);
+    anonymous(&channel);
+    channel.send("hello".to_owned()).await.unwrap();
+    assert_eq!(receive(&mut channel).await.unwrap(), "5");
+}
+
+#[derive(Debug)]
+struct CountedCodec {
+    drops: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Drop for CountedCodec {
+    fn drop(&mut self) {
+        self.drops.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl Encode<String, u32> for CountedCodec {
+    type EncodeError = std::num::ParseIntError;
+    fn encode(&self, message: String) -> Result<u32, Self::EncodeError> {
+        Decimal.encode(message)
+    }
+}
+
+impl Decode<u32, String> for CountedCodec {
+    type DecodeError = io::Error;
+    fn decode(&self, message: u32) -> Result<String, io::Error> {
+        Decimal.decode(message)
+    }
+}
+
+#[tokio::test]
+async fn split_conversion_keeps_the_codec_until_both_directions_are_dropped() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let drops = Arc::new(AtomicUsize::new(0));
+    let channel = pair(1).with_codec(CountedCodec {
+        drops: Arc::clone(&drops),
+    });
+    let (mut sender, mut receiver) = split(channel);
+    assert_eq!(sender.peer(), receiver.peer());
+    anonymous(&sender);
+    sender.send("7".to_owned()).await.unwrap();
+    drop(sender);
+    assert_eq!(drops.load(Ordering::SeqCst), 0);
+    assert_eq!(receive(&mut receiver).await.unwrap(), "7");
+    drop(receiver);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
 }
 
 #[derive(Debug)]
@@ -387,6 +539,51 @@ async fn shared_receive_cancellation_preserves_the_next_message() {
     assert_eq!(receive(&mut receiver).await.unwrap(), 21);
 }
 
+#[tokio::test]
+async fn conversion_before_arc_split_preserves_privacy_and_recovers_from_codec_errors() {
+    let mut channel = Channel::from_shared(CodecChannel::new(SharedBackend::new(), Decimal));
+    duplex(&channel);
+    anonymous(&channel);
+    let error = channel.send("invalid".to_owned()).await.unwrap_err();
+    assert!(matches!(error, CodecError::Codec(_)));
+    channel.send("42".to_owned()).await.unwrap();
+    assert_eq!(receive(&mut channel).await.unwrap(), "42");
+    let (mut sender, mut receiver) = split(channel);
+    assert_eq!(sender.peer(), receiver.peer());
+    anonymous(&sender);
+    sender.send("0".to_owned()).await.unwrap();
+    let error = receive(&mut receiver).await.unwrap_err();
+    assert_eq!(error.source().unwrap().to_string(), "zero rejected");
+    sender.send("43".to_owned()).await.unwrap();
+    assert_eq!(receive(&mut receiver).await.unwrap(), "43");
+}
+
+#[tokio::test]
+async fn conversion_after_shared_adaptation_can_split_and_run_in_separate_tasks() {
+    let channel = Channel::from_shared(SharedBackend::new()).with_codec(Decimal);
+    let (mut sender, mut receiver) = split(channel);
+    anonymous(&sender);
+    assert_eq!(sender.peer(), receiver.peer());
+    let send = tokio::spawn(async move {
+        sender.send("51".to_owned()).await.unwrap();
+    });
+    assert_eq!(receive(&mut receiver).await.unwrap(), "51");
+    send.await.unwrap();
+}
+
+#[tokio::test]
+async fn shared_conversion_preserves_backend_errors() {
+    let mut backend = SharedBackend::new();
+    backend.receiver.get_mut().close();
+    let mut channel = Channel::from_shared(CodecChannel::new(backend, Decimal));
+    let error = channel.send("42".to_owned()).await.unwrap_err();
+    assert!(matches!(error, CodecError::Transport(_)));
+    assert_eq!(error.source().unwrap().to_string(), "channel closed");
+    let error = receive(&mut channel).await.unwrap_err();
+    assert!(matches!(error, CodecError::Transport(_)));
+    assert_eq!(error.source().unwrap().to_string(), "receiver closed");
+}
+
 async fn generic_duplex_roundtrip<M, S, R>(channel: Channel<S, R>, message: M)
 where
     M: Send + Clone + std::fmt::Debug + PartialEq,
@@ -407,19 +604,10 @@ where
 async fn public_duplex_contract_provides_owned_directions_for_every_adapter() {
     generic_duplex_roundtrip(pair(1), 31).await;
     generic_duplex_roundtrip(Channel::from_shared(SharedBackend::new()), 32).await;
-}
-
-#[tokio::test]
-async fn shared_backend_preserves_backend_errors() {
-    let mut backend = SharedBackend::new();
-    backend.receiver.get_mut().close();
-    let mut channel = Channel::from_shared(backend);
-    assert_eq!(
-        channel.send(42).await.unwrap_err().to_string(),
-        "channel closed"
-    );
-    assert_eq!(
-        receive(&mut channel).await.unwrap_err().to_string(),
-        "receiver closed"
-    );
+    generic_duplex_roundtrip(pair(1).with_codec(Decimal), "33".to_owned()).await;
+    generic_duplex_roundtrip(
+        Channel::from_shared(CodecChannel::new(SharedBackend::new(), Decimal)),
+        "34".to_owned(),
+    )
+    .await;
 }

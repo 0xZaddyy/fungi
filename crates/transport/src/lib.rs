@@ -5,7 +5,7 @@
 //! [`Channel`] owns independent directions, separated by consuming [`split`].
 //! [`Channel`] combines native simplex capabilities.
 //! [`Channel::from_shared`] wraps an optional [`SharedChannel`] backend and supplies
-//! owned splitting through `Arc`.
+//! owned splitting through `Arc`. [`CodecChannel`] adapts each available direction.
 //! [`SendChannel::Privacy`] describes transport disclosure to the destination,
 //! including session authentication. Application code controls payload disclosure.
 //!
@@ -39,12 +39,14 @@
 //! ```
 
 mod channel;
+mod codec;
 mod privacy;
 
 pub use channel::{
-    Channel, ChannelBuilder, PeerChannel, PeerMismatch, RecvChannel, RecvView, SendChannel,
-    SendView, SharedChannel, SharedRecvHalf, SharedSendHalf, into_stream, split,
+    Channel, ChannelBuilder, ConvertedChannel, PeerChannel, PeerMismatch, RecvChannel, RecvView,
+    SendChannel, SendView, SharedChannel, SharedRecvHalf, SharedSendHalf, into_stream, split,
 };
+pub use codec::{Codec, CodecChannel, CodecError, CodecPair, Decode, Encode};
 pub use privacy::{Anonymous, Privacy, Unspecified};
 
 #[cfg(test)]

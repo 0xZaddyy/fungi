@@ -249,6 +249,10 @@ impl<M, R: RecvChannel<M>> RecvChannel<M> for RecvView<'_, R> {
     }
 }
 
+/// Duplex directions converted through one shared immutable codec.
+pub type ConvertedChannel<S, R, K, W = Vec<u8>> =
+    Channel<crate::CodecChannel<S, Arc<K>, W>, crate::CodecChannel<R, Arc<K>, W>>;
+
 impl<S: PeerChannel, R: PeerChannel<Peer = S::Peer>> Channel<S, R> {
     /// Bundle capabilities after verifying they refer to the same peer.
     ///
@@ -279,6 +283,22 @@ impl<S, R> Channel<S, R> {
     /// Consume the adapter and return its independently owned directions.
     pub fn into_split(self) -> (S, R) {
         (self.sender, self.receiver)
+    }
+
+    /// Convert both directions while preserving privacy, errors, and ownership.
+    pub fn with_codec<M: Send, W: Send, K: crate::Codec<M, W>>(
+        self,
+        codec: K,
+    ) -> ConvertedChannel<S, R, K, W>
+    where
+        S: SendChannel<W>,
+        R: RecvChannel<W>,
+    {
+        let codec = Arc::new(codec);
+        Channel {
+            sender: crate::CodecChannel::new(self.sender, Arc::clone(&codec)),
+            receiver: crate::CodecChannel::new(self.receiver, codec),
+        }
     }
 
     /// Borrow disjoint directions, allowing simultaneous operations on the pair.
