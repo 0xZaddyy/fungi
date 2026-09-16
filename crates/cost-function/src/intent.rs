@@ -120,4 +120,14 @@ mod tests {
         );
         assert_eq!(curve.clone(), curve);
     }
+
+    #[test]
+    fn an_intent_keeps_its_action_and_payoff_curve() {
+        let start = Instant::now();
+        let intent = IntentWithPolicy::new(Action::OutputCreation(request()), single_peaked(start));
+
+        assert_eq!(intent.inner, Action::OutputCreation(request()));
+        assert_eq!(intent.payoff_curve, single_peaked(start));
+        assert_eq!(intent.clone(), intent);
+    }
 }
