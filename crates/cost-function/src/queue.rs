@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use crate::intent::IntentWithPolicy;
+use crate::intent::Intent;
 
 /// All the information the wallet has about what the user wants to do.
 pub trait Queue {
@@ -15,18 +15,18 @@ pub trait Queue {
     type Id: Copy + Eq + Hash + Debug;
 
     /// Every intent with its id, in no particular order.
-    fn iter(&self) -> impl Iterator<Item = (Self::Id, &IntentWithPolicy)>;
+    fn iter(&self) -> impl Iterator<Item = (Self::Id, &Intent)>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InMemoryQueue {
-    intents: HashMap<u64, IntentWithPolicy>,
+    intents: HashMap<u64, Intent>,
     next_id: u64,
 }
 
 impl InMemoryQueue {
     /// Take intents into a queue, naming each one as it lands.
-    pub fn new(intents: impl IntoIterator<Item = IntentWithPolicy>) -> Self {
+    pub fn new(intents: impl IntoIterator<Item = Intent>) -> Self {
         let mut queue = InMemoryQueue {
             intents: HashMap::new(),
             next_id: 0,
@@ -38,7 +38,7 @@ impl InMemoryQueue {
     }
 
     /// Add an intent, returning the id it will be known by.
-    pub fn push(&mut self, intent: IntentWithPolicy) -> u64 {
+    pub fn push(&mut self, intent: Intent) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         self.intents.insert(id, intent);
@@ -49,7 +49,7 @@ impl InMemoryQueue {
 impl Queue for InMemoryQueue {
     type Id = u64;
 
-    fn iter(&self) -> impl Iterator<Item = (u64, &IntentWithPolicy)> {
+    fn iter(&self) -> impl Iterator<Item = (u64, &Intent)> {
         self.intents.iter().map(|(&id, intent)| (id, intent))
     }
 }
@@ -63,8 +63,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     /// Built from an explicit `start` so two calls with the same arguments compare equal.
-    fn intent(start: Instant, sats: u64) -> IntentWithPolicy {
-        IntentWithPolicy::new(
+    fn intent(start: Instant, sats: u64) -> Intent {
+        Intent::new(
             Action::OutputCreation(FixedPaymentInstructions {
                 script_pubkey: ScriptBuf::from_bytes(vec![0x51]),
                 amount: Amount::from_sat(sats),
