@@ -32,6 +32,9 @@ jobs:
           send-statistics: "false"
       - uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
       - uses: DeterminateSystems/magic-nix-cache-action@55718cd9ebf1737a061487d5ada21abf31e99a98 # main
+        with:
+          # The Actions cache is enough for now; FlakeHub needs a paid account.
+          use-flakehub: false
       - name: Validate commits
         run: >-
           nix run --no-update-lock-file '.?shallow=1#validate-commits' -- "$BASE_SHA..HEAD"
