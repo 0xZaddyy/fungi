@@ -50,15 +50,15 @@ impl PayoffCurve {
 
 /// An [`Action`] together with a [`PayoffCurve`] determined by the user.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct IntentWithPolicy {
+pub struct Intent {
     pub(crate) inner: Action,
     pub(crate) payoff_curve: PayoffCurve,
 }
 
-impl IntentWithPolicy {
+impl Intent {
     /// Build an intent with the payoff curve the user attached to it.
     pub fn new(inner: Action, payoff_curve: PayoffCurve) -> Self {
-        IntentWithPolicy {
+        Intent {
             inner,
             payoff_curve,
         }
@@ -119,5 +119,15 @@ mod tests {
             ]
         );
         assert_eq!(curve.clone(), curve);
+    }
+
+    #[test]
+    fn an_intent_keeps_its_action_and_payoff_curve() {
+        let start = Instant::now();
+        let intent = Intent::new(Action::OutputCreation(request()), single_peaked(start));
+
+        assert_eq!(intent.inner, Action::OutputCreation(request()));
+        assert_eq!(intent.payoff_curve, single_peaked(start));
+        assert_eq!(intent.clone(), intent);
     }
 }
