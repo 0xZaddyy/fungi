@@ -25,6 +25,7 @@
       imports = [
         ./nix/apps.nix
         ./nix/checks
+        ./nix/devshell.nix
         ./nix/package.nix
         ./nix/toolchain.nix
         ./nix/treefmt.nix
