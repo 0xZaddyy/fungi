@@ -3,7 +3,7 @@
 /// Intents realized by one transaction, named by the ids of the queue they came from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Batch<Id> {
-    intents: Vec<Id>,
+    pub(crate) intents: Vec<Id>,
 }
 
 #[cfg(test)]

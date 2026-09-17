@@ -2,4 +2,5 @@
 
 pub mod batch;
 pub mod intent;
+pub mod plan;
 pub mod queue;
