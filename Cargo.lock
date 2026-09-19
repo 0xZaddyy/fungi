@@ -159,6 +159,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d"
 
 [[package]]
+name = "fungi-bip77-directory"
+version = "0.0.0"
+dependencies = [
+ "bech32",
+ "fungi-mailbox",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "fungi-mailbox"
 version = "0.0.0"
 dependencies = [

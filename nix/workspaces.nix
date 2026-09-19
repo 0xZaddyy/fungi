@@ -6,6 +6,7 @@
   fungi = {
     manifestPath = "Cargo.toml";
     packages = {
+      fungi-bip77-directory = { };
       cost-function = { };
       fungi-mailbox = { };
       fungi-transport = { };
