@@ -1,0 +1,17 @@
+[package]
+name = "fungi-mailbox"
+description = "Deterministic linked-mailbox broadcast channel for shared-secret peers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+futures-core = "0.3"
+futures-util = { version = "0.3", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "sync", "test-util", "time"] }
+
+[lints]
+workspace = true
