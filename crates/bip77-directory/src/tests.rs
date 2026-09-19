@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::sync::Mutex;
+use std::io::Cursor;
+use std::sync::{Arc, Mutex};
 
 use fungi_mailbox::{MailboxStore, PutOutcome, derive_slot_id};
 
 use super::*;
+
+type Ciphertexts = Arc<Mutex<Vec<Vec<u8>>>>;
 
 #[derive(Debug, Default)]
 struct ReferenceDirectory {
@@ -99,4 +102,78 @@ async fn concurrent_writers_observe_one_winner() {
 async fn empty_mailbox_maps_accepted_to_none() {
     let store = Bip77MailboxStore::new(ReferenceDirectory::default(), "https://directory.test");
     assert_eq!(store.get(derive_slot_id(&[3; 32], 0)).await.unwrap(), None);
+}
+
+#[derive(Debug)]
+struct LoopbackRelay {
+    server: ::ohttp::Server,
+    ciphertexts: Ciphertexts,
+}
+
+impl Relay for LoopbackRelay {
+    type Error = Infallible;
+
+    async fn post(&self, body: Vec<u8>) -> Result<Vec<u8>, Self::Error> {
+        assert_eq!(body.len(), ENCAPSULATED_MESSAGE_BYTES);
+        self.ciphertexts.lock().unwrap().push(body.clone());
+
+        let (plaintext, response_context) = self.server.decapsulate(&body).unwrap();
+        assert_eq!(plaintext.len(), 8104);
+        let request = bhttp::Message::read_bhttp(&mut Cursor::new(plaintext)).unwrap();
+        assert_eq!(request.control().method(), Some(&b"GET"[..]));
+
+        let mut response = bhttp::Message::response(bhttp::StatusCode::try_from(200_u16).unwrap());
+        response.write_content(b"mailbox payload");
+        let mut padded = [0; 8144];
+        response
+            .write_bhttp(bhttp::Mode::KnownLength, &mut padded.as_mut_slice())
+            .unwrap();
+        let encapsulated = response_context.encapsulate(&padded).unwrap();
+        assert_eq!(encapsulated.len(), ENCAPSULATED_MESSAGE_BYTES);
+        Ok(encapsulated)
+    }
+}
+
+fn ohttp_loopback() -> (OhttpExchange<LoopbackRelay>, Ciphertexts) {
+    use ::ohttp::hpke::{Aead, Kdf, Kem};
+    use ::ohttp::{KeyConfig, SymmetricSuite};
+
+    let config = KeyConfig::new(
+        1,
+        Kem::K256Sha256,
+        vec![SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)],
+    )
+    .unwrap();
+    let server = ::ohttp::Server::new(config).unwrap();
+    let encoded_config = server.config().encode().unwrap();
+    let ciphertexts = Arc::new(Mutex::new(Vec::new()));
+    let exchange = OhttpExchange::new(
+        LoopbackRelay {
+            server,
+            ciphertexts: Arc::clone(&ciphertexts),
+        },
+        encoded_config,
+    )
+    .unwrap();
+    (exchange, ciphertexts)
+}
+
+#[tokio::test]
+async fn ohttp_exchange_owns_context_and_never_reuses_ciphertext() {
+    let (exchange, ciphertexts) = ohttp_loopback();
+    let request = DirectoryRequest {
+        method: Method::Get,
+        target: "https://directory.test/QQQQQQQQQQQQQ".to_owned(),
+        body: Vec::new(),
+    };
+
+    let first = exchange.exchange(request.clone()).await.unwrap();
+    let second = exchange.exchange(request).await.unwrap();
+    assert_eq!(first.status, 200);
+    assert_eq!(first.body, b"mailbox payload");
+    assert_eq!(second, first);
+
+    let ciphertexts = ciphertexts.lock().unwrap();
+    assert_eq!(ciphertexts.len(), 2);
+    assert_ne!(ciphertexts[0], ciphertexts[1]);
 }

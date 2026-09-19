@@ -13,6 +13,10 @@ use std::future::Future;
 use bech32::{Hrp, NoChecksum};
 use fungi_mailbox::{MailboxStore, PutOutcome, SlotId};
 
+mod ohttp;
+
+pub use ohttp::{ENCAPSULATED_MESSAGE_BYTES, OhttpExchange, OhttpExchangeError, Relay};
+
 /// A BIP77 mailbox identifier encoded as 13 uppercase bech32 characters.
 ///
 /// BIP77 mailbox paths carry 64 bits without an HRP, separator, or checksum.
