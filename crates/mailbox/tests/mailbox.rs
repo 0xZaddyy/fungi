@@ -8,6 +8,7 @@ use std::time::Duration;
 use fungi_mailbox::{
     AppendOnlyMessageSet, LinkedMailbox, MailboxStore, PutOutcome, SlotId, derive_slot_id,
 };
+use fungi_transport::{Anonymous, Channel, PeerChannel, RecvChannel, SendChannel, split};
 use futures_util::StreamExt;
 use tokio::sync::Notify;
 
@@ -79,6 +80,118 @@ impl MailboxStore for MemStore {
             }
         }
     }
+}
+
+/// Test-only transport adapter over the existing mailbox API.
+///
+/// An OHTTP-backed `MailboxStore` would complete an entire OHTTP transaction
+/// inside each `put` or `get`; the channel directions only see mailbox
+/// messages and never need to correlate OHTTP requests with responses.
+#[derive(Debug)]
+struct MailboxSender<'a> {
+    mailbox: &'a LinkedMailbox<&'a MemStore>,
+    peer: SlotId,
+}
+
+#[derive(Debug)]
+struct MailboxReceiver<'a> {
+    mailbox: &'a LinkedMailbox<&'a MemStore>,
+    peer: SlotId,
+    delivered: usize,
+}
+
+impl PeerChannel for MailboxSender<'_> {
+    type Peer = SlotId;
+
+    fn peer(&self) -> &Self::Peer {
+        &self.peer
+    }
+}
+
+impl PeerChannel for MailboxReceiver<'_> {
+    type Peer = SlotId;
+
+    fn peer(&self) -> &Self::Peer {
+        &self.peer
+    }
+}
+
+impl SendChannel<Vec<u8>> for MailboxSender<'_> {
+    // This marker models the eventual OHTTP construction path. The in-memory
+    // fixture itself makes no privacy claim outside this integration check.
+    type Privacy = Anonymous;
+    type SendError = Infallible;
+
+    async fn send(&mut self, message: Vec<u8>) -> Result<(), Self::SendError> {
+        self.mailbox.append(message).await
+    }
+}
+
+impl RecvChannel<Vec<u8>> for MailboxReceiver<'_> {
+    type RecvError = Infallible;
+
+    async fn recv(&mut self) -> Result<Vec<u8>, Self::RecvError> {
+        loop {
+            let mut messages = self.mailbox.messages().skip(self.delivered);
+            if let Some(message) = messages.next().await {
+                self.delivered += 1;
+                return message;
+            }
+            // An empty long-poll window is not channel closure. Retry the same
+            // logical position until a message arrives or the caller cancels.
+        }
+    }
+}
+
+fn mailbox_channel<'a>(
+    mailbox: &'a LinkedMailbox<&'a MemStore>,
+    secret: &[u8; 32],
+) -> Channel<MailboxSender<'a>, MailboxReceiver<'a>> {
+    // The first derived slot is a stable, non-secret identity for this test's
+    // logical mailbox destination.
+    let peer = derive_slot_id(secret, 0);
+    Channel::new(
+        MailboxSender { mailbox, peer },
+        MailboxReceiver {
+            mailbox,
+            peer,
+            delivered: 0,
+        },
+    )
+    .unwrap()
+}
+
+#[tokio::test(start_paused = true)]
+async fn linked_mailbox_adapts_to_an_ohttp_style_split_channel() {
+    let store = MemStore::new(Duration::from_millis(50));
+    let secret = [7; 32];
+    let mailbox = LinkedMailbox::new(&store, secret);
+    let channel = mailbox_channel(&mailbox, &secret);
+    assert_eq!(*channel.peer(), derive_slot_id(&secret, 0));
+
+    let (mut sender, mut receiver) = split(channel);
+
+    // Expiring more than one directory poll window must not close the
+    // transport receiver, and cancelling that wait must not advance it.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(125), receiver.recv())
+            .await
+            .is_err()
+    );
+
+    let first = b"first".to_vec();
+    let (sent, received) =
+        futures_util::future::join(sender.send(first.clone()), receiver.recv()).await;
+    sent.unwrap();
+    assert_eq!(received.unwrap(), first);
+
+    // Reusing the independently owned directions preserves the receiver's
+    // logical position rather than redelivering the first mailbox slot.
+    let second = b"second".to_vec();
+    let (sent, received) =
+        futures_util::future::join(sender.send(second.clone()), receiver.recv()).await;
+    sent.unwrap();
+    assert_eq!(received.unwrap(), second);
 }
 
 #[tokio::test(start_paused = true)]
