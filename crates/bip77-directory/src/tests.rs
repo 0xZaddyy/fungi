@@ -108,6 +108,7 @@ async fn empty_mailbox_maps_accepted_to_none() {
 struct LoopbackRelay {
     server: ::ohttp::Server,
     ciphertexts: Ciphertexts,
+    mailboxes: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
 }
 
 impl Relay for LoopbackRelay {
@@ -120,10 +121,26 @@ impl Relay for LoopbackRelay {
         let (plaintext, response_context) = self.server.decapsulate(&body).unwrap();
         assert_eq!(plaintext.len(), 8104);
         let request = bhttp::Message::read_bhttp(&mut Cursor::new(plaintext)).unwrap();
-        assert_eq!(request.control().method(), Some(&b"GET"[..]));
+        let method = request.control().method().unwrap();
+        let path = request.control().path().unwrap().to_vec();
+        let (status, content) = match method {
+            b"POST" => {
+                self.mailboxes
+                    .lock()
+                    .unwrap()
+                    .entry(path)
+                    .or_insert_with(|| request.content().to_vec());
+                (200_u16, Vec::new())
+            }
+            b"GET" => match self.mailboxes.lock().unwrap().get(&path).cloned() {
+                Some(message) => (200, message),
+                None => (202, Vec::new()),
+            },
+            _ => (405, Vec::new()),
+        };
 
-        let mut response = bhttp::Message::response(bhttp::StatusCode::try_from(200_u16).unwrap());
-        response.write_content(b"mailbox payload");
+        let mut response = bhttp::Message::response(bhttp::StatusCode::try_from(status).unwrap());
+        response.write_content(&content);
         let mut padded = [0; 8144];
         response
             .write_bhttp(bhttp::Mode::KnownLength, &mut padded.as_mut_slice())
@@ -147,10 +164,15 @@ fn ohttp_loopback() -> (OhttpExchange<LoopbackRelay>, Ciphertexts) {
     let server = ::ohttp::Server::new(config).unwrap();
     let encoded_config = server.config().encode().unwrap();
     let ciphertexts = Arc::new(Mutex::new(Vec::new()));
+    let mailboxes = Mutex::new(HashMap::from([(
+        b"/QQQQQQQQQQQQQ".to_vec(),
+        b"mailbox payload".to_vec(),
+    )]));
     let exchange = OhttpExchange::new(
         LoopbackRelay {
             server,
             ciphertexts: Arc::clone(&ciphertexts),
+            mailboxes,
         },
         encoded_config,
     )
@@ -176,4 +198,26 @@ async fn ohttp_exchange_owns_context_and_never_reuses_ciphertext() {
     let ciphertexts = ciphertexts.lock().unwrap();
     assert_eq!(ciphertexts.len(), 2);
     assert_ne!(ciphertexts[0], ciphertexts[1]);
+}
+
+#[tokio::test]
+async fn transport_channel_runs_over_real_ohttp_transactions() {
+    use fungi_transport::{PeerChannel, RecvChannel, SendChannel, split};
+
+    let (exchange, ciphertexts) = ohttp_loopback();
+    let secret = [8; 32];
+    let channel = ohttp_mailbox_channel(exchange, "https://directory.test", secret);
+    assert_eq!(*channel.peer(), derive_slot_id(&secret, 0));
+    let (mut sender, mut receiver) = split(channel);
+
+    sender.send(b"through OHTTP".to_vec()).await.unwrap();
+    assert_eq!(receiver.recv().await.unwrap(), b"through OHTTP");
+    sender.send(b"next message".to_vec()).await.unwrap();
+    assert_eq!(receiver.recv().await.unwrap(), b"next message");
+
+    // Each message needs one POST, its verification GET, and its receiving
+    // GET. Resuming reception must not re-fetch an earlier slot.
+    let ciphertexts = ciphertexts.lock().unwrap();
+    assert_eq!(ciphertexts.len(), 6);
+    assert!(ciphertexts.windows(2).all(|pair| pair[0] != pair[1]));
 }

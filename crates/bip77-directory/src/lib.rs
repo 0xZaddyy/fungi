@@ -14,8 +14,10 @@ use bech32::{Hrp, NoChecksum};
 use fungi_mailbox::{MailboxStore, PutOutcome, SlotId};
 
 mod ohttp;
+mod transport;
 
 pub use ohttp::{ENCAPSULATED_MESSAGE_BYTES, OhttpExchange, OhttpExchangeError, Relay};
+pub use transport::{Bip77Receiver, Bip77Sender, ohttp_mailbox_channel};
 
 /// A BIP77 mailbox identifier encoded as 13 uppercase bech32 characters.
 ///

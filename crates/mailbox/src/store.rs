@@ -33,12 +33,6 @@ pub trait MailboxStore: Send + Sync {
 
     /// Fetch the message stored at `slot_id`, waiting out an
     /// implementation-defined window before reporting it empty.
-    ///
-    /// [`messages`](crate::AppendOnlyMessageSet::messages) stops at the first
-    /// `None` this returns, so that wait is what turns "nothing here yet"
-    /// into "no writer showed up in a fair window" — a considered guess, not
-    /// a guarantee, since a slower writer can still claim this slot after
-    /// the wait elapses.
     fn get(
         &self,
         slot_id: SlotId,

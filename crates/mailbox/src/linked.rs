@@ -11,6 +11,15 @@ use futures_util::stream;
 use crate::slot::derive_slot_id;
 use crate::store::{MailboxStore, PutOutcome};
 
+/// Borrowed stream of messages read from a linked mailbox.
+pub type MailboxMessages<'a, S> = Pin<
+    Box<
+        dyn Stream<Item = Result<<S as MailboxStore>::Message, <S as MailboxStore>::Error>>
+            + Send
+            + 'a,
+    >,
+>;
+
 /// An append-only message set shared by peers who hold the same secret.
 ///
 /// Peers append without enrollment or coordination. Reading yields every
@@ -61,6 +70,22 @@ impl<S> LinkedMailbox<S> {
     }
 }
 
+impl<S: MailboxStore> LinkedMailbox<S> {
+    /// Stream messages beginning at `index` in the linked slot chain.
+    ///
+    /// This lets stateful consumers resume without re-reading earlier slots.
+    pub fn messages_from(&self, index: u64) -> MailboxMessages<'_, S> {
+        Box::pin(stream::try_unfold(index, move |index| async move {
+            let slot_id = derive_slot_id(&self.shared_secret, index);
+            Ok(self
+                .store
+                .get(slot_id)
+                .await?
+                .map(|message| (message, index + 1)))
+        }))
+    }
+}
+
 impl<S: MailboxStore> AppendOnlyMessageSet for LinkedMailbox<S> {
     type Message = S::Message;
     type Error = S::Error;
@@ -85,13 +110,6 @@ impl<S: MailboxStore> AppendOnlyMessageSet for LinkedMailbox<S> {
     }
 
     fn messages(&self) -> Self::Messages<'_> {
-        Box::pin(stream::try_unfold(0u64, move |index| async move {
-            let slot_id = derive_slot_id(&self.shared_secret, index);
-            Ok(self
-                .store
-                .get(slot_id)
-                .await?
-                .map(|message| (message, index + 1)))
-        }))
+        self.messages_from(0)
     }
 }

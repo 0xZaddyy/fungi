@@ -7,6 +7,6 @@ mod linked;
 mod slot;
 mod store;
 
-pub use linked::{AppendOnlyMessageSet, LinkedMailbox};
+pub use linked::{AppendOnlyMessageSet, LinkedMailbox, MailboxMessages};
 pub use slot::{SlotId, derive_slot_id};
 pub use store::{MailboxStore, PutOutcome};
