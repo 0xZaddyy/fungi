@@ -1,0 +1,24 @@
+[package]
+name = "fungi-bip77-directory"
+description = "BIP77 directory backend for Fungi linked mailboxes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bech32 = { version = "0.11", default-features = false, features = ["alloc"] }
+bhttp = "0.6.1"
+fungi-mailbox = { path = "../mailbox" }
+fungi-transport = { path = "../transport" }
+futures-util = { version = "0.3", default-features = false }
+ohttp = { package = "bitcoin-ohttp", version = "0.6.0", default-features = false, features = ["client", "rust-hpke"] }
+rand = "0.8"
+thiserror = "2"
+url = "2"
+
+[dev-dependencies]
+ohttp = { package = "bitcoin-ohttp", version = "0.6.0", features = ["server"] }
+tokio = { version = "1", features = ["macros", "rt", "sync"] }
+
+[lints]
+workspace = true
