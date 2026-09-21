@@ -20,6 +20,36 @@ pub trait Persister {
     fn close(&self) -> Result<(), Self::InternalStorageError>;
 }
 
+/// What a state transition asks its persister to do.
+pub enum PersistActions<Event> {
+    /// Nothing happened worth recording.
+    NoOp,
+    /// Record one event.
+    Save(Event),
+    /// Record one event and end the session.
+    /// If close fails for any reason, the event is still recorded.
+    /// Similarly if save fails, the session is not closed.
+    SaveAndClose(Event),
+}
+
+impl<Event> PersistActions<Event> {
+    /// Carry out the action against `persister`.
+    pub fn execute<P>(self, persister: &P) -> Result<(), P::InternalStorageError>
+    where
+        P: Persister<SessionEvent = Event>,
+    {
+        match self {
+            Self::NoOp => {}
+            Self::Save(event) => persister.save_event(event)?,
+            Self::SaveAndClose(event) => {
+                persister.save_event(event)?;
+                persister.close()?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,6 +106,40 @@ mod tests {
 
         persister.close().expect("in memory storage cannot fail");
 
+        assert!(*persister.closed.borrow());
+    }
+
+    fn execute(action: PersistActions<u8>) -> InMemoryPersister {
+        let persister = InMemoryPersister::default();
+
+        action
+            .execute(&persister)
+            .expect("in memory storage cannot fail");
+
+        persister
+    }
+
+    #[test]
+    fn a_no_op_records_nothing() {
+        let persister = execute(PersistActions::NoOp);
+
+        assert!(persister.events.borrow().is_empty());
+        assert!(!*persister.closed.borrow());
+    }
+
+    #[test]
+    fn a_save_leaves_the_session_open() {
+        let persister = execute(PersistActions::Save(1));
+
+        assert_eq!(*persister.events.borrow(), [1]);
+        assert!(!*persister.closed.borrow());
+    }
+
+    #[test]
+    fn a_closing_save_records_the_event_first() {
+        let persister = execute(PersistActions::SaveAndClose(1));
+
+        assert_eq!(*persister.events.borrow(), [1]);
         assert!(*persister.closed.borrow());
     }
 }
