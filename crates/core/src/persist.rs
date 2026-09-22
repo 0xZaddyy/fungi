@@ -67,6 +67,7 @@ mod tests {
         type SessionEvent = u8;
 
         fn save_event(&self, event: u8) -> Result<(), Infallible> {
+            assert!(!*self.closed.borrow());
             self.events.borrow_mut().push(event);
             Ok(())
         }
