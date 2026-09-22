@@ -4,3 +4,9 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+
+[dev-dependencies]
+thiserror = "2"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
