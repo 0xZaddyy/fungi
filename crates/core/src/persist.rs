@@ -51,6 +51,7 @@ impl<Event> PersistActions<Event> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use std::cell::RefCell;
@@ -142,5 +143,100 @@ mod tests {
 
         assert_eq!(*persister.events.borrow(), [1]);
         assert!(*persister.closed.borrow());
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum Call {
+        Save(u8),
+        Close,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+    enum TestError {
+        #[error("save failed")]
+        Save,
+        #[error("close failed")]
+        Close,
+    }
+
+    struct MockPersister {
+        calls: RefCell<Vec<Call>>,
+        save_result: Result<(), TestError>,
+        close_result: Result<(), TestError>,
+    }
+
+    impl Persister for MockPersister {
+        type InternalStorageError = TestError;
+        type SessionEvent = u8;
+
+        fn save_event(&self, event: u8) -> Result<(), TestError> {
+            self.calls.borrow_mut().push(Call::Save(event));
+            self.save_result
+        }
+
+        fn load(&self) -> Result<Box<dyn Iterator<Item = u8>>, TestError> {
+            panic!("unexpected load call");
+        }
+
+        fn close(&self) -> Result<(), TestError> {
+            self.calls.borrow_mut().push(Call::Close);
+            self.close_result
+        }
+    }
+
+    #[test]
+    fn a_closing_save_calls_save_then_close_once() {
+        let persister = MockPersister {
+            calls: RefCell::new(vec![]),
+            save_result: Ok(()),
+            close_result: Ok(()),
+        };
+
+        let result = PersistActions::SaveAndClose(1).execute(&persister);
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(*persister.calls.borrow(), [Call::Save(1), Call::Close]);
+    }
+
+    #[test]
+    fn a_save_propagates_the_storage_error() {
+        let persister = MockPersister {
+            calls: RefCell::new(vec![]),
+            save_result: Err(TestError::Save),
+            close_result: Ok(()),
+        };
+
+        let result = PersistActions::Save(1).execute(&persister);
+
+        assert_eq!(result, Err(TestError::Save));
+        assert_eq!(*persister.calls.borrow(), [Call::Save(1)]);
+    }
+
+    #[test]
+    fn a_failed_save_does_not_close_the_session() {
+        let persister = MockPersister {
+            calls: RefCell::new(vec![]),
+            save_result: Err(TestError::Save),
+            close_result: Ok(()),
+        };
+
+        let result = PersistActions::SaveAndClose(1).execute(&persister);
+
+        assert_eq!(result, Err(TestError::Save));
+        assert_eq!(*persister.calls.borrow(), [Call::Save(1)]);
+    }
+
+    #[test]
+    fn a_failed_close_propagates_the_error_after_saving() {
+        let persister = MockPersister {
+            calls: RefCell::new(vec![]),
+            save_result: Ok(()),
+            close_result: Err(TestError::Close),
+        };
+
+        let result = PersistActions::SaveAndClose(1).execute(&persister);
+
+        assert_eq!(result, Err(TestError::Close));
+        assert_eq!(*persister.calls.borrow(), [Call::Save(1), Call::Close]);
     }
 }
