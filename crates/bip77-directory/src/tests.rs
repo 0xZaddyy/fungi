@@ -560,3 +560,99 @@ async fn encrypted_response_must_contain_valid_bhttp_response_control() {
 fn invalid_key_configuration_is_rejected() {
     assert!(OhttpExchange::new(Vec::new()).is_err());
 }
+
+#[tokio::test]
+async fn simplex_channel_runs_over_ohttp() {
+    use fungi_transport::{ChannelBuilder, RecvChannel, SendChannel, Unspecified};
+
+    fn sender<C: SendChannel<Privacy = Unspecified>>(_: &C) {}
+    let (exchange, _) = ohttp_loopback();
+    let mut builder = Builder::new(exchange, "https://directory.test").unwrap();
+    let mut sender_end = builder.build(&[23; 32]).await.unwrap();
+    let mut receiver = builder.receiver([23; 32]);
+    sender(&sender_end);
+
+    for message in [b"first".to_vec(), Vec::new(), b"third".to_vec()] {
+        sender_end.send(message.clone()).await.unwrap();
+        assert_eq!(receiver.recv().await.unwrap(), message);
+    }
+}
+
+#[tokio::test]
+async fn receivers_keep_independent_positions() {
+    use fungi_transport::{ChannelBuilder, RecvChannel, SendChannel};
+
+    let (exchange, _) = ohttp_loopback();
+    let mut builder = Builder::new(exchange, "https://directory.test").unwrap();
+    let mut sender = builder.build(&[24; 32]).await.unwrap();
+    let mut early = builder.receiver([24; 32]);
+    sender.send(b"first".to_vec()).await.unwrap();
+    assert_eq!(early.recv().await.unwrap(), b"first");
+    sender.send(b"second".to_vec()).await.unwrap();
+
+    let mut late = builder.receiver([24; 32]);
+    assert_eq!(early.recv().await.unwrap(), b"second");
+    assert_eq!(late.recv().await.unwrap(), b"first");
+    assert_eq!(late.recv().await.unwrap(), b"second");
+}
+
+#[tokio::test(start_paused = true)]
+async fn empty_ohttp_polls_can_be_cancelled_without_skipping_messages() {
+    use fungi_transport::{ChannelBuilder, RecvChannel, SendChannel};
+    use std::future::Future;
+    use std::pin::pin;
+    use std::task::{Context, Waker};
+
+    let (exchange, _) = ohttp_loopback();
+    let mut builder = Builder::new(exchange, "https://directory.test").unwrap();
+    let mut sender = builder.build(&[18; 32]).await.unwrap();
+    let mut receiver = builder.receiver([18; 32]);
+    for message in [b"first".to_vec(), b"second".to_vec()] {
+        // Poll through an encrypted 202, then cancel the pending receive.
+        {
+            let mut receive = pin!(receiver.recv());
+            for _ in 0..2 {
+                assert!(
+                    receive
+                        .as_mut()
+                        .poll(&mut Context::from_waker(Waker::noop()))
+                        .is_pending()
+                );
+            }
+        }
+        let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::join!(sender.send(message.clone()), receiver.recv())
+        })
+        .await
+        .unwrap();
+        sent.unwrap();
+        assert_eq!(received.unwrap(), message);
+    }
+}
+
+#[tokio::test]
+async fn channel_ends_resume_after_a_restart() {
+    use fungi_transport::{ChannelBuilder, RecvChannel, SendChannel};
+
+    let (exchange, _) = ohttp_loopback();
+    let mut builder = Builder::new(exchange, "https://directory.test").unwrap();
+    let mut sender = builder.build(&[25; 32]).await.unwrap();
+    let mut receiver = builder.receiver([25; 32]);
+    sender.send(b"before".to_vec()).await.unwrap();
+    assert_eq!(receiver.recv().await.unwrap(), b"before");
+    let (send_index, receive_index) = (sender.next_index(), receiver.next_index());
+
+    let mut sender = builder.resume_sender([25; 32], send_index);
+    let mut receiver = builder.resume_receiver([25; 32], receive_index);
+    sender.send(b"after".to_vec()).await.unwrap();
+    assert_eq!(receiver.recv().await.unwrap(), b"after");
+}
+
+#[test]
+fn builder_rejects_directory_urls_without_a_path() {
+    let (exchange, _) = ohttp_loopback();
+    assert!(matches!(
+        Builder::new(exchange, "mailto:directory@example.com"),
+        Err(DirectoryUrlError::NoPath)
+    ));
+}
