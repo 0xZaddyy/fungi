@@ -4,7 +4,7 @@ use crate::batch::Batch;
 
 /// Groupings of the queued intents, each batch realized by one transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Plan<Id> {
+pub struct PlanIntent<Id> {
     pub(crate) batches: Vec<Batch<Id>>,
 }
 
@@ -18,7 +18,7 @@ mod tests {
         let first: <InMemoryQueue as Queue>::Id = 0;
         let second = 1;
 
-        let plan = Plan {
+        let plan = PlanIntent {
             batches: vec![
                 Batch {
                     intents: vec![first],
