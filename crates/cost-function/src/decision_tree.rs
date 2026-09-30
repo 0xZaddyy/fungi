@@ -1,9 +1,9 @@
-use crate::plan::Plan;
+use crate::plan::PlanIntent;
 
 /// Where the next unplaced intent could go.
 pub(crate) enum DecisionTree<Id> {
     Branch(Vec<Node<Id>>),
-    Leaf(Plan<Id>),
+    Leaf(PlanIntent<Id>),
 }
 
 /// One way to place one intent.
@@ -25,7 +25,7 @@ mod tests {
         }
     }
 
-    fn plan_of(tree: &DecisionTree<Id>) -> Option<&Plan<Id>> {
+    fn plan_of(tree: &DecisionTree<Id>) -> Option<&PlanIntent<Id>> {
         match tree {
             DecisionTree::Leaf(plan) => Some(plan),
             DecisionTree::Branch(_) => None,
@@ -34,7 +34,7 @@ mod tests {
 
     #[test]
     fn an_edge_places_one_intent_and_leads_to_the_rest() {
-        let finished = Plan {
+        let finished = PlanIntent {
             batches: Vec::new(),
         };
 
