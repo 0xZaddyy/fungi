@@ -16,8 +16,8 @@ jobs:
       actions: write # REST cache deletes
       contents: read
     steps:
-      - uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
-      - uses: Mic92/hestia@f1f4df2801140a36398ed423533c8460618539df # v3.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # main
+      - uses: Mic92/hestia@dfed9ced335d28978ba74e513939a10db1f71025 # v3.1.0
       - name: Run garbage collection
         run: '"$HESTIA_BIN" gc'
         env:
