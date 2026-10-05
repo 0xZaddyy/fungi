@@ -8,6 +8,8 @@ use crate::wallet::Utxo;
 /// Version, locktime, segwit marker and flag, and one-byte input and output counts.
 pub(crate) const TX_OVERHEAD: Weight = Weight::from_wu(42);
 
+pub(crate) mod random;
+
 pub(crate) struct FundingRequest<'a> {
     /// Coins the selector may draw on.
     pub(crate) available: &'a [Utxo],
