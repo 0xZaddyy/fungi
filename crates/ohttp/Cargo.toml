@@ -1,0 +1,17 @@
+[package]
+name = "fungi-ohttp"
+description = "Clients for services behind Oblivious HTTP (RFC 9458)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bech32 = { version = "0.11", default-features = false, features = ["alloc"] }
+ohttp-client = { version = "0.0.2", features = ["secp256k1"] }
+thiserror = "2"
+
+[dev-dependencies]
+bhttp = "0.7.2"
+bitcoin-ohttp = "0.6.0"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
