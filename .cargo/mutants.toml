@@ -1,0 +1,4 @@
+# Both expressions return an empty slice. Keep the nonempty-body mutations.
+exclude_re = [
+  '^crates/bip77/src/lib\.rs:\d+:\d+: replace <impl Request for Get>::body -> &\[u8\] with Vec::leak\(Vec::new\(\)\)$',
+]

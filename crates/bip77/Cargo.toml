@@ -1,0 +1,15 @@
+[package]
+name = "fungi-bip77"
+description = "BIP77 directory mailbox interface"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bech32 = { version = "0.11", default-features = false, features = ["alloc"] }
+thiserror = "2"
+
+[dev-dependencies]
+proptest = "1"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
