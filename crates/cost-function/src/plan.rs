@@ -1,11 +1,13 @@
 //! Complete groupings of the queued intents.
 
+use std::collections::BTreeSet;
+
 use crate::batch::Batch;
 
 /// Groupings of the queued intents, each batch realized by one transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlanIntent<Id> {
-    pub(crate) batches: Vec<Batch<Id>>,
+    pub(crate) batches: BTreeSet<Batch<Id>>,
 }
 
 #[cfg(test)]
@@ -19,19 +21,27 @@ mod tests {
         let second = 1;
 
         let plan = PlanIntent {
-            batches: vec![
+            batches: BTreeSet::from([
                 Batch {
-                    intents: vec![first],
+                    intents: BTreeSet::from([first]),
                 },
                 Batch {
-                    intents: vec![second],
+                    intents: BTreeSet::from([second]),
                 },
-            ],
+            ]),
         };
 
-        assert_eq!(plan.batches.len(), 2);
-        assert_eq!(plan.batches[0].intents, [first]);
-        assert_eq!(plan.batches[1].intents, [second]);
+        assert_eq!(
+            plan.batches,
+            BTreeSet::from([
+                Batch {
+                    intents: BTreeSet::from([second]),
+                },
+                Batch {
+                    intents: BTreeSet::from([first]),
+                },
+            ])
+        );
         assert_eq!(plan.clone(), plan);
     }
 }

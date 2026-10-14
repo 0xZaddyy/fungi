@@ -1,9 +1,11 @@
 //! Groups of intents realized together.
 
+use std::collections::BTreeSet;
+
 /// Intents realized by one transaction, named by the ids of the queue they came from.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Batch<Id> {
-    pub(crate) intents: Vec<Id>,
+    pub(crate) intents: BTreeSet<Id>,
 }
 
 #[cfg(test)]
@@ -32,10 +34,10 @@ mod tests {
         let second = queue.push(intent(start, 2));
 
         let batch: Batch<<InMemoryQueue as Queue>::Id> = Batch {
-            intents: vec![first, second],
+            intents: BTreeSet::from([first, second]),
         };
 
-        assert_eq!(batch.intents, [first, second]);
+        assert_eq!(batch.intents, BTreeSet::from([second, first]));
         assert_eq!(batch.clone(), batch);
     }
 }

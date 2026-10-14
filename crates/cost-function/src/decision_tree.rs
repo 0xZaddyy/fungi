@@ -15,6 +15,7 @@ pub(crate) struct Node<Id> {
 mod tests {
     use super::*;
     use crate::queue::{InMemoryQueue, Queue};
+    use std::collections::BTreeSet;
 
     type Id = <InMemoryQueue as Queue>::Id;
 
@@ -35,7 +36,7 @@ mod tests {
     #[test]
     fn an_edge_places_one_intent_and_leads_to_the_rest() {
         let finished = PlanIntent {
-            batches: Vec::new(),
+            batches: BTreeSet::new(),
         };
 
         let tree = DecisionTree::Branch(vec![Node {
