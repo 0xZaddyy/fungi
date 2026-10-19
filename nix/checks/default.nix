@@ -10,7 +10,7 @@
     ./coverage
     ./doc.nix
     ./mutants.nix
-    ./no-todo-comments.nix
+    ./no-fixme-comments.nix
     ./registry.nix
     ./tests
   ];
