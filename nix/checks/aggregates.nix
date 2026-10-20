@@ -69,8 +69,8 @@
             lint = join "lint" (
               [
                 {
-                  name = "no-todo-comments";
-                  path = config.checks.no-todo-comments;
+                  name = "no-fixme-comments";
+                  path = config.checks.no-fixme-comments;
                 }
               ]
               ++ selectTagged "lint"
